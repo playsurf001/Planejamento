@@ -401,10 +401,35 @@ function updateUIForRole() {
   }
 }
 
-function showUserInfo() {
+// Helper: Get user avatar HTML
+function getUserAvatar(user, size = 'md') {
+  const sizeClasses = {
+    'sm': 'w-8 h-8 text-sm',
+    'md': 'w-10 h-10 text-base',
+    'lg': 'w-12 h-12 text-lg',
+    'xl': 'w-16 h-16 text-xl',
+    '2xl': 'w-24 h-24 text-2xl'
+  };
+  
+  const sizeClass = sizeClasses[size] || sizeClasses['md'];
+  
+  if (user.foto_perfil) {
+    return `<img src="${user.foto_perfil}" alt="${user.nome}" class="${sizeClass} rounded-full object-cover border-2 border-white shadow-sm">`;
+  } else {
+    // Generate initials
+    const initials = user.nome 
+      ? user.nome.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase() 
+      : 'U';
+    return `<div class="${sizeClass} rounded-full bg-gradient-to-br from-teal-400 to-teal-600 flex items-center justify-center text-white font-bold shadow-sm border-2 border-white">${initials}</div>`;
+  }
+}
+
+// Update user info in header and all UI elements
+function updateUserInfo() {
+  if (!AppState.currentUser) return;
+  
   const userInfoDiv = document.getElementById('userInfo');
   const userInfoMobileDiv = document.getElementById('userInfo-mobile');
-  if (!AppState.currentUser) return;
   
   // Detectar se é supervisor por permissões customizadas
   const isSupervisor = AppState.currentUser?.permissoes?.is_supervisor === true;
@@ -418,14 +443,13 @@ function showUserInfo() {
   if (userInfoDiv) {
     userInfoDiv.innerHTML = `
       <div class="flex items-center gap-3">
-        <span class="text-white font-semibold">${AppState.currentUser.nome}</span>
-        <span class="${roleColor} text-white text-xs px-3 py-1 rounded-full font-semibold">
-          ${roleLabel}
-        </span>
-        <button onclick="handleLogout()" id="btnLogout" class="bg-red-600 hover:bg-red-700 text-white text-sm px-4 py-1 rounded-lg transition flex items-center gap-2">
-          <i class="fas fa-sign-out-alt"></i>
-          Sair
-        </button>
+        ${getUserAvatar(AppState.currentUser, 'md')}
+        <div class="flex flex-col items-start">
+          <span class="text-white font-semibold text-sm">${AppState.currentUser.nome}</span>
+          <span class="${roleColor} text-white text-xs px-2 py-0.5 rounded-full font-semibold">
+            ${roleLabel}
+          </span>
+        </div>
       </div>
     `;
   }
@@ -433,17 +457,21 @@ function showUserInfo() {
   // Mobile userInfo
   if (userInfoMobileDiv) {
     userInfoMobileDiv.innerHTML = `
-      <div class="flex items-center justify-between">
-        <div>
-          <p class="text-white font-semibold text-sm">${AppState.currentUser.nome}</p>
-          <span class="${roleColor} text-white text-xs px-2 py-0.5 rounded-full font-semibold inline-block mt-1">
+      <div class="flex items-center gap-3">
+        ${getUserAvatar(AppState.currentUser, 'md')}
+        <div class="flex-1">
+          <p class="text-white font-semibold">${AppState.currentUser.nome}</p>
+          <p class="${roleColor} text-white text-xs px-2 py-0.5 rounded-full font-semibold inline-block mt-1">
             ${roleLabel}
-          </span>
+          </p>
         </div>
-        <i class="fas fa-user-circle text-3xl text-white opacity-50"></i>
       </div>
     `;
   }
+}
+
+function showUserInfo() {
+  updateUserInfo();
 }
 
 function handleLogout() {
@@ -2162,11 +2190,11 @@ function renderDesignersList() {
   
   container.innerHTML = AppState.designers.map(d => `
     <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
-      <span class="font-medium text-gray-800">
-        <i class="fas fa-user-circle text-teal-600 mr-2"></i>
-        ${d.nome}
-      </span>
-      <button onclick="deleteDesigner(${d.id})" class="text-teal-600 hover:text-teal-800">
+      <div class="flex items-center gap-3">
+        ${getUserAvatar(d, 'md')}
+        <span class="font-medium text-gray-800">${d.nome}</span>
+      </div>
+      <button onclick="deleteDesigner(${d.id})" class="text-red-600 hover:text-red-800 transition">
         <i class="fas fa-trash"></i>
       </button>
     </div>
@@ -4281,49 +4309,88 @@ async function handleAvatarUpload(event) {
   if (!file) return;
   
   // Validate file type
-  if (!file.type.startsWith('image/')) {
-    showNotification('Por favor, selecione uma imagem válida', 'error');
+  const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+  if (!validTypes.includes(file.type)) {
+    showNotification('Formato inválido. Use: JPG, PNG ou WEBP', 'error');
+    event.target.value = ''; // Reset input
     return;
   }
   
   // Validate file size (500KB)
   if (file.size > 500 * 1024) {
     showNotification('Imagem muito grande. Máximo: 500KB', 'error');
+    event.target.value = ''; // Reset input
     return;
   }
   
   try {
+    // Show loading state
+    const preview = document.getElementById('avatar-preview');
+    const originalHTML = preview.innerHTML;
+    preview.innerHTML = '<i class="fas fa-spinner fa-spin text-3xl text-teal-600"></i>';
+    
     // Convert to base64
     const reader = new FileReader();
     reader.onloadend = async () => {
-      const dataUrl = reader.result;
-      
-      // Update preview immediately
-      const preview = document.getElementById('avatar-preview');
-      preview.innerHTML = `<img src="${dataUrl}" alt="Avatar" class="w-full h-full object-cover">`;
-      
-      // Save to server
-      const token = localStorage.getItem('auth_token');
-      const response = await axios.put(`${API_URL}/api/user/avatar`, {
-        foto_perfil: dataUrl
-      }, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      
-      if (response.data.success) {
-        showNotification('Foto de perfil atualizada!', 'success');
+      try {
+        const dataUrl = reader.result;
         
-        // Update avatar in header
-        updateHeaderAvatar(dataUrl);
-      } else {
-        showNotification(response.data.message || 'Erro ao salvar foto', 'error');
+        // Save to server
+        const token = localStorage.getItem('auth_token');
+        if (!token) {
+          showNotification('Sessão expirada. Faça login novamente.', 'error');
+          setTimeout(() => window.location.href = '/login', 2000);
+          return;
+        }
+        
+        const response = await axios.put(`${API_URL}/api/user/avatar`, {
+          foto_perfil: dataUrl
+        }, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (response.data && response.data.success) {
+          // Update AppState
+          if (AppState.currentUser) {
+            AppState.currentUser.foto_perfil = dataUrl;
+          }
+          
+          // Update localStorage
+          const userData = JSON.parse(localStorage.getItem('user_data') || '{}');
+          userData.foto_perfil = dataUrl;
+          localStorage.setItem('user_data', JSON.stringify(userData));
+          
+          // Update preview immediately
+          updateAvatarPreview(dataUrl, AppState.currentUser?.nome);
+          
+          // Update avatar in header
+          updateUserInfo();
+          
+          showNotification('✓ Foto de perfil atualizada!', 'success');
+        } else {
+          preview.innerHTML = originalHTML;
+          showNotification(response.data?.message || 'Erro ao salvar foto', 'error');
+        }
+      } catch (error) {
+        preview.innerHTML = originalHTML;
+        console.error('Erro ao fazer upload da foto:', error);
+        const errorMessage = error.response?.data?.message || 
+                            error.response?.statusText || 
+                            'Erro ao fazer upload da foto';
+        showNotification(errorMessage, 'error');
       }
+    };
+    
+    reader.onerror = () => {
+      preview.innerHTML = originalHTML;
+      showNotification('Erro ao ler arquivo de imagem', 'error');
     };
     
     reader.readAsDataURL(file);
   } catch (error) {
     console.error('Erro ao fazer upload da foto:', error);
     showNotification('Erro ao fazer upload da foto', 'error');
+    event.target.value = ''; // Reset input
   }
 }
 
@@ -4341,11 +4408,18 @@ async function handleSaveProfile(event) {
   }
   
   const btn = document.getElementById('btn-save-profile');
+  const originalHTML = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Salvando...';
   
   try {
     const token = localStorage.getItem('auth_token');
+    if (!token) {
+      showNotification('Sessão expirada. Faça login novamente.', 'error');
+      setTimeout(() => window.location.href = '/login', 2000);
+      return;
+    }
+    
     const response = await axios.put(`${API_URL}/api/user/profile`, {
       nome,
       email: email || null,
@@ -4354,25 +4428,44 @@ async function handleSaveProfile(event) {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     
-    if (response.data.success) {
-      showNotification('Perfil atualizado com sucesso!', 'success');
+    if (response.data && response.data.success) {
+      // Update AppState
+      if (AppState.currentUser) {
+        AppState.currentUser.nome = response.data.data.nome;
+        AppState.currentUser.email = response.data.data.email;
+        AppState.currentUser.nome_exibicao = response.data.data.nome_exibicao;
+        if (response.data.data.foto_perfil) {
+          AppState.currentUser.foto_perfil = response.data.data.foto_perfil;
+        }
+      }
       
       // Update user data in localStorage
       const userData = JSON.parse(localStorage.getItem('user_data') || '{}');
       userData.nome = response.data.data.nome;
+      userData.email = response.data.data.email;
+      userData.nome_exibicao = response.data.data.nome_exibicao;
+      if (response.data.data.foto_perfil) {
+        userData.foto_perfil = response.data.data.foto_perfil;
+      }
       localStorage.setItem('user_data', JSON.stringify(userData));
       
       // Update UI
       updateUserInfo();
+      
+      showNotification('✓ Perfil atualizado com sucesso!', 'success');
     } else {
-      showNotification(response.data.message || 'Erro ao salvar perfil', 'error');
+      showNotification(response.data?.message || 'Erro ao salvar perfil', 'error');
     }
   } catch (error) {
     console.error('Erro ao salvar perfil:', error);
-    showNotification(error.response?.data?.message || 'Erro ao salvar perfil', 'error');
+    const errorMessage = error.response?.data?.message || 
+                        error.response?.statusText || 
+                        error.message || 
+                        'Erro ao salvar perfil';
+    showNotification(errorMessage, 'error');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-save mr-2"></i>Salvar Perfil';
+    btn.innerHTML = originalHTML;
   }
 }
 
@@ -6307,13 +6400,22 @@ async function loadRanking() {
         ? 'bg-orange-50' 
         : '';
       
+      // Generate avatar from designer name
+      const designerObj = { nome: item.designer, foto_perfil: null };
+      const avatarHTML = getUserAvatar(designerObj, 'md');
+      
       const tr = document.createElement('tr');
       tr.className = `hover:bg-gray-100 ${rowClass}`;
       tr.innerHTML = `
         <td class="px-6 py-4 text-center ${posicaoClass}">
           ${item.medalha || item.posicao}
         </td>
-        <td class="px-6 py-4 text-sm font-semibold text-gray-900">${item.designer}</td>
+        <td class="px-6 py-4">
+          <div class="flex items-center gap-3">
+            ${avatarHTML}
+            <span class="text-sm font-semibold text-gray-900">${item.designer}</span>
+          </div>
+        </td>
         <td class="px-6 py-4 text-center text-sm text-gray-900">${item.total_criadas}</td>
         <td class="px-6 py-4 text-center text-sm text-green-600 font-semibold">${item.total_aprovadas}</td>
         <td class="px-6 py-4 text-center text-sm text-red-600">${item.total_reprovadas}</td>
@@ -6729,4 +6831,5 @@ window.clearRankingFilters = clearRankingFilters;
 window.loadRelatorioExecutivo = loadRelatorioExecutivo;
 window.clearRelatorioFilters = clearRelatorioFilters;
 window.gerarPDF = gerarPDF;
+window.getUserAvatar = getUserAvatar;
 
