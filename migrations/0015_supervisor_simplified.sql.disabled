@@ -1,0 +1,70 @@
+-- Migration 0015: Simplified SUPERVISOR role update
+-- Date: 2026-02-04
+-- Description: Update role constraint to allow 'supervisor' and add audit_logs table
+
+-- Step 1: Recreate designers table with new role check
+-- SQLite doesn't support modifying CHECK constraints, so we need to recreate
+
+PRAGMA foreign_keys=OFF;
+
+-- Create backup
+CREATE TABLE designers_backup AS SELECT * FROM designers;
+
+-- Drop old table
+DROP TABLE designers;
+
+-- Recreate with new role check
+CREATE TABLE designers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nome TEXT NOT NULL,
+  ativo INTEGER DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  role TEXT DEFAULT 'user' CHECK(role IN ('admin', 'user', 'supervisor')),
+  senha TEXT,
+  email TEXT,
+  foto_perfil TEXT,
+  nome_exibicao TEXT,
+  configuracoes TEXT DEFAULT '{}',
+  excluir_grafico INTEGER DEFAULT 0,
+  permissoes TEXT DEFAULT NULL,
+  sector_id INTEGER
+);
+
+-- Copy data back
+INSERT INTO designers 
+SELECT * FROM designers_backup;
+
+-- Drop backup
+DROP TABLE designers_backup;
+
+-- Recreate indexes
+CREATE INDEX IF NOT EXISTS idx_designers_email ON designers(email);
+CREATE INDEX IF NOT EXISTS idx_designers_role ON designers(role);
+
+PRAGMA foreign_keys=ON;
+
+-- Step 2: Create audit_logs table (simplified without foreign keys)
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  actor_user_id INTEGER NOT NULL,
+  action_type TEXT NOT NULL CHECK(action_type IN ('CREATE', 'EDIT', 'DELETE', 'APPROVE', 'REJECT')),
+  entity TEXT NOT NULL,
+  entity_id INTEGER NOT NULL,
+  old_value TEXT,
+  new_value TEXT,
+  reason TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity, entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at);
+
+-- Step 3: Add status_aprovacao and aprovador_id to lancamentos if not exists
+-- Note: Using ALTER TABLE ADD COLUMN is safe if column doesn't exist
+ALTER TABLE lancamentos ADD COLUMN status_aprovacao TEXT DEFAULT 'pendente' CHECK(status_aprovacao IN ('pendente', 'aprovado', 'reprovado'));
+ALTER TABLE lancamentos ADD COLUMN aprovador_id INTEGER;
+ALTER TABLE lancamentos ADD COLUMN data_aprovacao DATETIME;
+
+CREATE INDEX IF NOT EXISTS idx_lancamentos_status ON lancamentos(status_aprovacao);
+CREATE INDEX IF NOT EXISTS idx_lancamentos_aprovador ON lancamentos(aprovador_id);

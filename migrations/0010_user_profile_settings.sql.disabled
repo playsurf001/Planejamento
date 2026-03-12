@@ -1,0 +1,67 @@
+-- Migration 0010: User Profile and Settings
+-- Date: 2026-01-30
+-- Description: Add user profile fields to designers table
+
+-- Disable foreign keys temporarily
+PRAGMA foreign_keys=OFF;
+
+-- Drop view that depends on designers table
+DROP VIEW IF EXISTS vw_produtos_planejados;
+
+-- Create new table with all fields
+CREATE TABLE IF NOT EXISTS designers_new (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nome TEXT NOT NULL,
+  ativo INTEGER DEFAULT 1,
+  role TEXT DEFAULT 'user',
+  senha TEXT,
+  email TEXT,
+  foto_perfil TEXT,
+  nome_exibicao TEXT,
+  configuracoes TEXT DEFAULT '{}',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Copy existing data
+INSERT INTO designers_new (id, nome, ativo, role, senha, created_at)
+SELECT id, nome, ativo, COALESCE(role, 'user'), senha, created_at
+FROM designers;
+
+-- Drop old table
+DROP TABLE designers;
+
+-- Rename new table
+ALTER TABLE designers_new RENAME TO designers;
+
+-- Recreate indexes
+CREATE INDEX IF NOT EXISTS idx_designers_email ON designers(email);
+
+-- Recreate view vw_produtos_planejados
+CREATE VIEW IF NOT EXISTS vw_produtos_planejados AS
+SELECT 
+  pp.id,
+  pp.produto_id,
+  p.nome as produto_nome,
+  pp.quantidade_planejada,
+  pp.semana,
+  pp.mes,
+  pp.ano,
+  pp.periodo,
+  pp.status,
+  pp.admin_id,
+  da.nome as admin_nome,
+  pp.created_at,
+  pp.updated_at,
+  COALESCE(SUM(l.quantidade_criada), 0) as quantidade_concluida,
+  COALESCE(SUM(l.quantidade_aprovada), 0) as quantidade_aprovada,
+  ROUND(CAST(COALESCE(SUM(l.quantidade_criada), 0) AS FLOAT) / pp.quantidade_planejada * 100, 2) as progresso_percent
+FROM produtos_planejados pp
+JOIN produtos p ON pp.produto_id = p.id
+JOIN designers da ON pp.admin_id = da.id
+LEFT JOIN lancamentos l ON pp.id = l.planejamento_id
+GROUP BY pp.id, pp.produto_id, p.nome, pp.quantidade_planejada, 
+         pp.semana, pp.mes, pp.ano, pp.periodo, pp.status, 
+         pp.admin_id, da.nome, pp.created_at, pp.updated_at;
+
+-- Re-enable foreign keys
+PRAGMA foreign_keys=ON;
